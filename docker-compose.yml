@@ -1,0 +1,65 @@
+# Brings up Transmission itself plus this API in one stack. If you'd
+# rather keep using the Transmission daemon you already have running
+# natively on the host (e.g. via `sudo systemctl start transmission-daemon`),
+# skip the `transmission` service below and see the notes at the bottom
+# of this file for pointing the `api` service at it instead.
+
+services:
+  transmission:
+    image: lscr.io/linuxserver/transmission:latest
+    container_name: transmission
+    restart: unless-stopped
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+      # Uncomment to require RPC auth (recommended if this stack is ever
+      # reachable beyond localhost):
+      # - USER=transmission
+      # - PASS=changeme
+    volumes:
+      - transmission-config:/config
+      # Downloaded files land in a real folder on your machine, not a
+      # Docker-managed volume, so you can browse/move them normally.
+      - ./downloads:/downloads
+    ports:
+      - "9091:9091"   # Transmission's own web UI / RPC
+      - "51413:51413"
+      - "51413:51413/udp"
+
+  api:
+    build: .
+    container_name: transmission-api
+    restart: unless-stopped
+    depends_on:
+      - transmission
+    environment:
+      - TRANSMISSION_HOST=transmission   # service name above; Docker's internal DNS resolves it
+      - TRANSMISSION_PORT=9091
+      - TRANSMISSION_RPC_PATH=/transmission/rpc
+      - TRANSMISSION_PROTOCOL=http
+      # Match whatever you set on the transmission service above, if enabled:
+      # - TRANSMISSION_USERNAME=transmission
+      # - TRANSMISSION_PASSWORD=changeme
+      - PORT=3000
+      # Uncomment to require an X-API-Key header on every request to this API:
+      # - API_KEY=changeme
+    ports:
+      - "3000:3000"
+
+volumes:
+  transmission-config:
+
+# --- Using an existing host Transmission daemon instead ---
+# If you already run transmission-daemon natively on the host (outside
+# Docker) and just want to containerize the API:
+#   1. Delete/comment out the `transmission` service and its `depends_on`
+#      line above.
+#   2. Set the api service's TRANSMISSION_HOST to reach the host machine:
+#        - Docker Desktop (Mac/Windows/WSL2): TRANSMISSION_HOST=host.docker.internal
+#        - Linux without Docker Desktop: add under the api service:
+#            extra_hosts:
+#              - "host.docker.internal:host-gateway"
+#          then use TRANSMISSION_HOST=host.docker.internal as above.
+#   3. Make sure the host daemon's rpc-whitelist (if enabled) allows the
+#      Docker bridge network's IP range, or disable rpc-whitelist-enabled.

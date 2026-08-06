@@ -1,0 +1,474 @@
+openapi: 3.0.3
+info:
+  title: transmission-api
+  description: >
+    HTTP API that wraps a Transmission torrent daemon's RPC interface,
+    allowing you to monitor and control it (list, add, start, stop, verify,
+    move, and remove torrents; read session settings and stats) over
+    regular REST calls.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+tags:
+  - name: torrents
+    description: Manage and inspect torrents
+  - name: session
+    description: Transmission session settings and statistics
+  - name: meta
+    description: Wrapper API metadata
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness check for this wrapper API
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /torrents:
+    get:
+      tags: [torrents]
+      summary: List all torrents
+      responses:
+        "200":
+          description: A list of torrents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  torrents:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Torrent"
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+    post:
+      tags: [torrents]
+      summary: Add a torrent
+      description: >
+        Provide exactly one source: `magnet`, `url` (a link to a .torrent
+        file), or `metainfo` (base64-encoded .torrent file contents).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddTorrentRequest"
+            examples:
+              magnet:
+                summary: Add via magnet link
+                value:
+                  magnet: "magnet:?xt=urn:btih:EXAMPLEHASH&dn=example"
+              url:
+                summary: Add via .torrent URL
+                value:
+                  url: "https://example.com/file.torrent"
+              metainfo:
+                summary: Add via base64-encoded .torrent contents
+                value:
+                  metainfo: "<base64 data>"
+                  downloadDir: "/downloads"
+                  paused: false
+      responses:
+        "201":
+          description: Torrent added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddTorrentResponse"
+        "200":
+          description: Torrent already existed (duplicate)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddTorrentResponse"
+        "400":
+          description: Missing magnet, url, or metainfo
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}:
+    get:
+      tags: [torrents]
+      summary: Get a single torrent's details
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "200":
+          description: The torrent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  torrent:
+                    $ref: "#/components/schemas/Torrent"
+        "404":
+          description: Torrent not found
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+    delete:
+      tags: [torrents]
+      summary: Remove a torrent
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+        - name: deleteLocalData
+          in: query
+          description: Also delete the downloaded files from disk
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "204":
+          description: Torrent removed
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}/start:
+    post:
+      tags: [torrents]
+      summary: Resume/start a torrent
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "204":
+          description: Torrent started
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}/stop:
+    post:
+      tags: [torrents]
+      summary: Pause a torrent
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "204":
+          description: Torrent stopped
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}/verify:
+    post:
+      tags: [torrents]
+      summary: Force a hash-check of a torrent's data
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      responses:
+        "204":
+          description: Verification started
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}/location:
+    patch:
+      tags: [torrents]
+      summary: Move a torrent's data to a new folder
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location]
+              properties:
+                location:
+                  type: string
+                  example: /mnt/storage/downloads
+                move:
+                  type: boolean
+                  default: true
+                  description: Move existing data (true) vs. just point at the new path (false)
+      responses:
+        "204":
+          description: Location updated
+        "400":
+          description: Missing location
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /torrents/{id}/speed-limit:
+    patch:
+      tags: [torrents]
+      summary: Set a per-torrent speed limit
+      description: >
+        Set download/upload limits (in KB/s) for a single torrent. Pass
+        `null` for a direction to remove that torrent's limit and fall back
+        to the global session limit. Omit a field to leave it unchanged.
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeedLimitRequest"
+            examples:
+              limitDownload:
+                summary: Cap download at 500 KB/s
+                value:
+                  downloadKBps: 500
+              removeLimit:
+                summary: Remove this torrent's download limit
+                value:
+                  downloadKBps: null
+      responses:
+        "204":
+          description: Speed limit updated
+        "400":
+          description: Neither downloadKBps nor uploadKBps provided
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /session:
+    get:
+      tags: [session]
+      summary: Get raw Transmission session settings
+      responses:
+        "200":
+          description: Session settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  session:
+                    type: object
+                    additionalProperties: true
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /session/speed-limit:
+    patch:
+      tags: [session]
+      summary: Set the global (daemon-wide) speed limit
+      description: >
+        Set the overall download/upload speed cap (in KB/s) for the whole
+        daemon, applying to all torrents that don't have their own
+        per-torrent override. Pass `null` for a direction to remove that
+        global limit (unlimited). Omit a field to leave it unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeedLimitRequest"
+            examples:
+              limitBoth:
+                summary: Cap download at 1000 KB/s and upload at 200 KB/s
+                value:
+                  downloadKBps: 1000
+                  uploadKBps: 200
+              removeLimit:
+                summary: Remove the global download limit
+                value:
+                  downloadKBps: null
+      responses:
+        "204":
+          description: Global speed limit updated
+        "400":
+          description: Neither downloadKBps nor uploadKBps provided
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+  /stats:
+    get:
+      tags: [session]
+      summary: Get session/transfer statistics
+      responses:
+        "200":
+          description: Session stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stats:
+                    $ref: "#/components/schemas/SessionStats"
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Only required if the API_KEY environment variable is set on the server.
+
+  parameters:
+    TorrentId:
+      name: id
+      in: path
+      required: true
+      description: Transmission's numeric torrent id
+      schema:
+        type: integer
+        example: 1
+
+  responses:
+    TransmissionError:
+      description: Transmission RPC call failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+  schemas:
+    TorrentStatus:
+      type: integer
+      description: >
+        0=Stopped, 1=QueuedToVerify, 2=Verifying, 3=QueuedToDownload,
+        4=Downloading, 5=QueuedToSeed, 6=Seeding
+      enum: [0, 1, 2, 3, 4, 5, 6]
+
+    Torrent:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        hashString:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/TorrentStatus"
+        percentDone:
+          type: number
+          format: float
+          example: 0.42
+        rateDownload:
+          type: integer
+          description: Bytes/sec
+        rateUpload:
+          type: integer
+          description: Bytes/sec
+        eta:
+          type: integer
+          description: Seconds remaining, or -1/-2 for unknown/not applicable
+        totalSize:
+          type: integer
+        downloadedEver:
+          type: integer
+        uploadedEver:
+          type: integer
+        uploadRatio:
+          type: number
+          format: float
+        error:
+          type: integer
+        errorString:
+          type: string
+        downloadDir:
+          type: string
+        isFinished:
+          type: boolean
+        peersConnected:
+          type: integer
+        addedDate:
+          type: integer
+          description: Unix timestamp
+
+    AddTorrentRequest:
+      type: object
+      properties:
+        magnet:
+          type: string
+          description: A magnet URI
+        url:
+          type: string
+          description: A URL pointing to a .torrent file
+        metainfo:
+          type: string
+          description: Base64-encoded .torrent file contents
+        downloadDir:
+          type: string
+        paused:
+          type: boolean
+          default: false
+
+    AddTorrentResponse:
+      type: object
+      properties:
+        added:
+          type: boolean
+        duplicate:
+          type: boolean
+        torrent:
+          type: object
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+            hashString:
+              type: string
+
+    SessionStats:
+      type: object
+      properties:
+        activeTorrentCount:
+          type: integer
+        downloadSpeed:
+          type: integer
+        pausedTorrentCount:
+          type: integer
+        torrentCount:
+          type: integer
+        uploadSpeed:
+          type: integer
+        cumulative-stats:
+          $ref: "#/components/schemas/StatsBucket"
+        current-stats:
+          $ref: "#/components/schemas/StatsBucket"
+
+    StatsBucket:
+      type: object
+      properties:
+        downloadedBytes:
+          type: integer
+        uploadedBytes:
+          type: integer
+        filesAdded:
+          type: integer
+        sessionCount:
+          type: integer
+        secondsActive:
+          type: integer
+
+    SpeedLimitRequest:
+      type: object
+      description: >
+        At least one of downloadKBps/uploadKBps must be present. A number
+        sets the limit in KB/s; null disables that direction's limit;
+        omitting a field leaves it unchanged.
+      properties:
+        downloadKBps:
+          type: integer
+          nullable: true
+          example: 500
+        uploadKBps:
+          type: integer
+          nullable: true
+          example: 100
+
+security:
+  - ApiKeyAuth: []

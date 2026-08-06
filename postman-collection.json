@@ -1,0 +1,298 @@
+{
+  "info": {
+    "name": "transmission-api",
+    "description": "Requests for testing the transmission-api wrapper (health, torrents CRUD/control, session, stats). Uses {{baseUrl}} and optional {{apiKey}} collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "X-API-Key", "type": "string" },
+      { "key": "value", "value": "{{apiKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "apiKey", "value": "", "type": "string" },
+    { "key": "torrentId", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Meta",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "OpenAPI spec (JSON)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/openapi.json",
+              "host": ["{{baseUrl}}"],
+              "path": ["openapi.json"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Torrents",
+      "item": [
+        {
+          "name": "List torrents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents"]
+            }
+          }
+        },
+        {
+          "name": "Get torrent by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}"]
+            }
+          }
+        },
+        {
+          "name": "Add torrent (magnet)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"magnet\": \"magnet:?xt=urn:btih:EXAMPLEHASH&dn=example\",\n  \"paused\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents"]
+            }
+          }
+        },
+        {
+          "name": "Add torrent (URL to .torrent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/file.torrent\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents"]
+            }
+          }
+        },
+        {
+          "name": "Add torrent (base64 metainfo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metainfo\": \"<base64-encoded .torrent contents>\",\n  \"downloadDir\": \"/downloads\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents"]
+            }
+          }
+        },
+        {
+          "name": "Start torrent",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/start",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "start"]
+            }
+          }
+        },
+        {
+          "name": "Stop torrent",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/stop",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "stop"]
+            }
+          }
+        },
+        {
+          "name": "Verify torrent",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/verify",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "verify"]
+            }
+          }
+        },
+        {
+          "name": "Move torrent location",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"location\": \"/mnt/storage/downloads\",\n  \"move\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/location",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "location"]
+            }
+          }
+        },
+        {
+          "name": "Set per-torrent speed limit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"downloadKBps\": 500,\n  \"uploadKBps\": 100\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/speed-limit",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "speed-limit"]
+            }
+          }
+        },
+        {
+          "name": "Remove torrent",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}"]
+            }
+          }
+        },
+        {
+          "name": "Remove torrent + delete local data",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}?deleteLocalData=true",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}"],
+              "query": [
+                { "key": "deleteLocalData", "value": "true" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Session",
+      "item": [
+        {
+          "name": "Get session settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/session",
+              "host": ["{{baseUrl}}"],
+              "path": ["session"]
+            }
+          }
+        },
+        {
+          "name": "Get session stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["stats"]
+            }
+          }
+        },
+        {
+          "name": "Set global speed limit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"downloadKBps\": 1000,\n  \"uploadKBps\": 200\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/session/speed-limit",
+              "host": ["{{baseUrl}}"],
+              "path": ["session", "speed-limit"]
+            }
+          }
+        },
+        {
+          "name": "Remove global speed limit",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"downloadKBps\": null,\n  \"uploadKBps\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/session/speed-limit",
+              "host": ["{{baseUrl}}"],
+              "path": ["session", "speed-limit"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+downloads
+.git
+.gitignore
+npm-debug.log
+*.md
+postman_collection.json

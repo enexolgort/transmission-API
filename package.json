@@ -1,0 +1,29 @@
+{
+  "name": "transmission-api",
+  "version": "1.0.0",
+  "description": "TypeScript HTTP API to monitor and control a Transmission torrent daemon via its RPC interface",
+  "main": "dist/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "js-yaml": "^4.1.0",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.14.2",
+    "@types/swagger-ui-express": "^4.1.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.2"
+  }
+}
