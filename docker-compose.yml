@@ -43,7 +43,7 @@ services:
       # - TRANSMISSION_PASSWORD=changeme
       - PORT=3000
       # Uncomment to require an X-API-Key header on every request to this API:
-      # - API_KEY=changeme
+      - API_KEY=${API_KEY}
     ports:
       - "3000:3000"
 
