@@ -12,8 +12,9 @@ export class SftpConfigError extends Error {
 
 /**
  * Pushes a local file or directory to a remote SFTP server using SSH key
- * authentication. `remoteFolder` is created (recursively, if needed) if it
- * doesn't already exist. Connection details (host/user/key) come from
+ * authentication. `remoteFolder` is only created if it doesn't already
+ * exist (see note below on why this is checked rather than always calling
+ * a recursive mkdir). Connection details (host/user/key) come from
  * environment config; only the destination folder is expected to vary
  * per call.
  */
@@ -42,7 +43,15 @@ export async function pushToSftp(localPath: string, remoteFolder: string): Promi
       passphrase: passphrase || undefined,
     });
 
-    await client.mkdir(remoteFolder, true); // recursive; no-op if it already exists
+    // Only attempt to create the folder if it isn't already there. Calling
+    // recursive mkdir unconditionally can fail with a permission error on
+    // some servers (e.g. chrooted SFTP-only accounts) when a parent segment
+    // of the path already exists but isn't owned/creatable by this user —
+    // even though no actual creation is needed for that segment.
+    const remoteType = await client.exists(remoteFolder);
+    if (!remoteType) {
+      await client.mkdir(remoteFolder, true);
+    }
 
     const stat = fs.statSync(localPath);
     if (stat.isDirectory()) {
