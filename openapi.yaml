@@ -234,6 +234,56 @@ paths:
         "502":
           $ref: "#/components/responses/TransmissionError"
 
+  /torrents/{id}/push-sftp:
+    post:
+      tags: [torrents]
+      summary: Push a finished torrent's files to a remote server over SFTP
+      description: >
+        Uploads the torrent's local files to a remote SFTP server using SSH
+        key authentication. Connection details (host, username, private
+        key) come from server-side configuration; only the destination
+        folder is provided per call. The torrent must be fully downloaded.
+      parameters:
+        - $ref: "#/components/parameters/TorrentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [remoteFolder]
+              properties:
+                remoteFolder:
+                  type: string
+                  description: Destination folder on the remote SFTP server (created if missing)
+                  example: /incoming/movies
+      responses:
+        "200":
+          description: Upload completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pushed:
+                    type: boolean
+                  torrentId:
+                    type: integer
+                  localPath:
+                    type: string
+                  remoteFolder:
+                    type: string
+        "400":
+          description: Missing remoteFolder
+        "404":
+          description: Torrent not found
+        "409":
+          description: Torrent isn't finished downloading yet
+        "500":
+          description: SFTP not configured, private key missing, or upload failed
+        "502":
+          $ref: "#/components/responses/TransmissionError"
+
   /session:
     get:
       tags: [session]

@@ -201,6 +201,24 @@
           }
         },
         {
+          "name": "Push torrent via SFTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"remoteFolder\": \"/incoming/movies\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/torrents/{{torrentId}}/push-sftp",
+              "host": ["{{baseUrl}}"],
+              "path": ["torrents", "{{torrentId}}", "push-sftp"]
+            }
+          }
+        },
+        {
           "name": "Remove torrent",
           "request": {
             "method": "DELETE",

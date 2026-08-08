@@ -46,25 +46,72 @@ The API listens on `PORT` (default `3000`).
 
 ## Running with Docker
 
+Transmission's traffic is routed through OpenVPN with a kill switch (via
+[haugene/transmission-openvpn](https://github.com/haugene/docker-transmission-openvpn)),
+so it can't leak outside the VPN tunnel even if the connection drops. See
+**VPN setup (PureVPN)** below before your first `docker compose up`.
+
 ```bash
 docker compose up -d --build
 ```
 
-This brings up two containers: `transmission` (a full Transmission daemon,
-using the [linuxserver/transmission](https://docs.linuxserver.io/images/docker-transmission/)
-image) and `api` (this project, built from the included `Dockerfile`). The
-API is reachable at `http://localhost:3000`, and Transmission's own web UI
-at `http://localhost:9091`, if you want it.
+This brings up two containers: `transmission` (Transmission + OpenVPN) and
+`api` (this project, built from the included `Dockerfile`). The API is
+reachable at `http://localhost:3000`, and Transmission's own web UI at
+`http://localhost:9091`.
 
-Torrent data persists in two named Docker volumes (`transmission-config`,
-`transmission-downloads`) so it survives container restarts.
+Torrent data lands in real folders on your machine, not hidden Docker
+volumes:
+- `./downloads` — finished downloads
+- `./transmission-config` — Transmission's own state (settings, resume data)
+- `./vpn-config` — your PureVPN `.ovpn` file (see below)
 
-**Already running Transmission natively on the host** (e.g. via
-`transmission-daemon` from earlier in this README) and just want to
-containerize the API? Comment out the `transmission` service in
-`docker-compose.yml` and point `TRANSMISSION_HOST` at the host machine
-instead — see the notes at the bottom of that file for the exact steps
-(they differ slightly between Docker Desktop and native Linux Docker).
+### VPN setup (PureVPN)
+
+1. **Get PureVPN's OpenVPN config file and credentials** — these are
+   different from your PureVPN account login:
+   - Log in to PureVPN's [Member Area](https://my.purevpn.com/), go to
+     **Subscriptions**, and reveal your VPN-specific username/password
+     (separate from your account email/password).
+   - Download an `.ovpn` file for a P2P-friendly server location from the
+     **Manual Setup / OpenVPN Config Files** section of the same site.
+2. **Place the file** in this project at `./vpn-config/purevpn.ovpn`
+   (create the `vpn-config` folder if it doesn't exist).
+3. **Set your credentials** in `.env` (copy `.env.example` first if you
+   haven't already):
+   ```
+   PUREVPN_USERNAME=your-purevpn-vpn-username
+   PUREVPN_PASSWORD=your-purevpn-vpn-password
+   OPENVPN_CONFIG=purevpn
+   ```
+   `OPENVPN_CONFIG` should match your `.ovpn` filename without the
+   extension — leave it as `purevpn` if you followed step 2 exactly.
+4. Bring up the stack and check the logs to confirm the tunnel connected:
+   ```bash
+   docker compose up -d --build
+   docker compose logs -f transmission
+   ```
+   Look for a line like `Initialization Sequence Completed` — that means
+   OpenVPN is up.
+5. **Verify traffic is actually going through the VPN**, not just that
+   OpenVPN reports connected:
+   ```bash
+   docker exec transmission curl -s https://ifconfig.me
+   ```
+   The IP printed here should be a PureVPN server IP, not your real ISP
+   IP (compare it against `curl -s https://ifconfig.me` run directly on
+   your host, outside any container).
+
+If the VPN tunnel ever drops, the container's firewall blocks Transmission
+from reaching the internet at all (rather than falling back to your real
+IP) — you'll see torrents simply stop transferring rather than leak.
+
+**Already running Transmission natively on the host** and just want to
+containerize the API instead of using the VPN-routed setup above? See the
+commented-out notes at the bottom of `docker-compose.yml` for pointing
+`TRANSMISSION_HOST` at the host machine — but note that bypasses the VPN
+routing entirely, so only do this if your host's own network traffic is
+already routed through PureVPN some other way.
 
 To rebuild after code changes:
 ```bash
@@ -74,6 +121,7 @@ docker compose up -d --build api
 To view logs:
 ```bash
 docker compose logs -f api
+docker compose logs -f transmission
 ```
 
 ## API documentation (Swagger)
@@ -108,6 +156,7 @@ require the key.
 | POST   | `/torrents/:id/verify`         | Force a hash-check                            |
 | PATCH  | `/torrents/:id/location`       | Move a torrent's data to a new folder         |
 | PATCH  | `/torrents/:id/speed-limit`    | Set a per-torrent download/upload speed limit |
+| POST   | `/torrents/:id/push-sftp`      | Push a finished torrent's files to a remote server over SFTP |
 | DELETE | `/torrents/:id`                | Remove a torrent (`?deleteLocalData=true` to also delete files) |
 | GET    | `/session`                     | Raw Transmission session settings             |
 | PATCH  | `/session/speed-limit`         | Set the global (daemon-wide) speed limit      |
@@ -165,6 +214,50 @@ curl -X PATCH localhost:3000/torrents/1/speed-limit \
 Rules: send a number to set a limit, `null` to remove it for that
 direction, or omit a field entirely to leave it unchanged. At least one of
 `downloadKBps`/`uploadKBps` is required.
+
+### Push a torrent to a remote server over SFTP
+
+`POST /torrents/:id/push-sftp` uploads a finished torrent's files to
+another server using SSH key authentication. The torrent must be fully
+downloaded first, or this returns `409`.
+
+Connection details (host, username, private key) are configured once on
+the server side — only the destination folder is passed per request:
+
+```bash
+curl -X POST localhost:3000/torrents/1/push-sftp \
+  -H "Content-Type: application/json" \
+  -d '{"remoteFolder": "/incoming/movies"}'
+```
+
+**One-time setup:**
+
+1. Generate a key pair dedicated to this (don't reuse a personal key):
+   ```bash
+   ssh-keygen -t ed25519 -f ./sftp-keys/id_ed25519 -C "transmission-api push"
+   ```
+2. Add the **public** key (`./sftp-keys/id_ed25519.pub`) to the remote
+   server's `~/.ssh/authorized_keys` for whichever user you're connecting
+   as.
+3. Set the connection details in `.env`:
+   ```
+   SFTP_HOST=your.remote.server
+   SFTP_PORT=22
+   SFTP_USERNAME=someuser
+   ```
+   Leave `SFTP_PRIVATE_KEY_PASSPHRASE` blank unless you passphrase-protected
+   the key in step 1.
+4. Rebuild/restart: `docker compose up -d --build api`
+
+The private key itself is never an environment variable — it's mounted
+read-only into the container from `./sftp-keys/id_ed25519` (see
+`docker-compose.yml`). That folder is gitignored; never commit it.
+
+**How it finds the files:** the API asks Transmission for the torrent's
+`downloadDir`/`name`, then reads that same path itself — this only works
+because the `api` container mounts `./downloads` read-only at the exact
+same internal path (`/data/completed`) that the `transmission` container
+uses, so both containers agree on where a given torrent's files live.
 
 ### Securing the wrapper API
 
@@ -242,8 +335,12 @@ will overwrite your edits with its in-memory settings on the next restart.
 ```
 openapi.yaml               OpenAPI 3.0 spec (source of truth for /docs)
 Dockerfile                 multi-stage build for the api service
-docker-compose.yml          api + transmission stack
+docker-compose.yml          transmission (via VPN) + api stack
 .dockerignore
+vpn-config/                 your PureVPN .ovpn file goes here (gitignored)
+downloads/                  finished downloads land here (gitignored)
+transmission-config/        Transmission's own state (gitignored)
+sftp-keys/                  your SSH private key for push-sftp goes here (gitignored)
 src/
   types.ts                  RPC + domain types
   config.ts                 env var loading
@@ -251,6 +348,7 @@ src/
   routes.ts                 Express routes
   server.ts                 app bootstrap
   swagger.ts                loads openapi.yaml for swagger-ui-express
+  sftpClient.ts              SFTP push helper (SSH key auth)
 ```
 
 ## Extending it

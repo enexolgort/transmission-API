@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from "express";
+import path from "path";
 import { TransmissionClient, TransmissionRpcError } from "./transmissionClient";
+import { pushToSftp, SftpConfigError } from "./sftpClient";
 
 export function buildRouter(client: TransmissionClient): Router {
   const router = Router();
@@ -124,6 +126,53 @@ export function buildRouter(client: TransmissionClient): Router {
       const deleteLocalData = req.query.deleteLocalData === "true";
       await client.removeTorrent(Number(req.params.id), deleteLocalData);
       res.status(204).send();
+    })
+  );
+
+  // Pushes a finished torrent's files to a remote server over SFTP (SSH
+  // key auth). Connection details (host/user/key) come from server-side
+  // config; only the destination folder is provided in the request body,
+  // since it's the one thing expected to vary per call.
+  router.post(
+    "/torrents/:id/push-sftp",
+    h(async (req, res) => {
+      const { remoteFolder } = req.body ?? {};
+      if (!remoteFolder || typeof remoteFolder !== "string") {
+        res.status(400).json({ error: "remoteFolder (string) is required in the request body" });
+        return;
+      }
+
+      const id = Number(req.params.id);
+      const torrent = await client.getTorrent(id);
+      if (!torrent) {
+        res.status(404).json({ error: `Torrent ${id} not found` });
+        return;
+      }
+      if (!torrent.isFinished && torrent.percentDone < 1) {
+        res.status(409).json({
+          error: `Torrent ${id} isn't finished downloading yet (${Math.round(torrent.percentDone * 100)}%)`,
+        });
+        return;
+      }
+
+      const localPath = path.join(torrent.downloadDir, torrent.name);
+
+      try {
+        await pushToSftp(localPath, remoteFolder);
+      } catch (err) {
+        if (err instanceof SftpConfigError) {
+          res.status(500).json({ error: err.message });
+          return;
+        }
+        throw err;
+      }
+
+      res.json({
+        pushed: true,
+        torrentId: id,
+        localPath,
+        remoteFolder,
+      });
     })
   );
 

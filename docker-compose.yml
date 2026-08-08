@@ -1,31 +1,48 @@
-# Brings up Transmission itself plus this API in one stack. If you'd
-# rather keep using the Transmission daemon you already have running
-# natively on the host (e.g. via `sudo systemctl start transmission-daemon`),
-# skip the `transmission` service below and see the notes at the bottom
-# of this file for pointing the `api` service at it instead.
+# Brings up Transmission (routed through a VPN via OpenVPN, with a kill
+# switch so it can't leak traffic outside the tunnel) plus this API, in one
+# stack. See "VPN setup" in the README for how to get PureVPN's .ovpn file
+# and credentials before running this.
 
 services:
   transmission:
-    image: lscr.io/linuxserver/transmission:latest
+    image: haugene/transmission-openvpn:latest
     container_name: transmission
     restart: unless-stopped
+    cap_add:
+      - NET_ADMIN          # required so OpenVPN can manage routing/iptables
+    devices:
+      - /dev/net/tun
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Etc/UTC
-      # Uncomment to require RPC auth (recommended if this stack is ever
-      # reachable beyond localhost):
-      # - USER=transmission
-      # - PASS=changeme
+      - OPENVPN_PROVIDER=CUSTOM
+      # Filename (without .ovpn) of the config file placed in ./vpn-config below.
+      - OPENVPN_CONFIG=${OPENVPN_CONFIG:-purevpn}
+      # PureVPN's VPN-specific username/password (from their Member Area,
+      # NOT your account login) — set these in your .env file, never commit them.
+      - OPENVPN_USERNAME=${PUREVPN_USERNAME}
+      - OPENVPN_PASSWORD=${PUREVPN_PASSWORD}
+      # Allows the `api` service (and this host) to reach Transmission's
+      # RPC/web UI despite the VPN kill switch, which otherwise blocks
+      # everything not on this subnet. Must match the `vpn_net` subnet below.
+      - LOCAL_NETWORK=172.28.0.0/16
+      # Simplest for a local-only stack; set real values on both this
+      # service and `api` below if you want RPC auth too.
+      - TRANSMISSION_RPC_AUTHENTICATION_REQUIRED=false
     volumes:
-      - transmission-config:/config
-      # Downloaded files land in a real folder on your machine, not a
-      # Docker-managed volume, so you can browse/move them normally.
-      - ./downloads:/downloads
+      # Your PureVPN .ovpn file(s) go here, e.g. ./vpn-config/purevpn.ovpn
+      - ./vpn-config:/etc/openvpn/custom
+      # Transmission's own state (blocklists, resume data, settings.json)
+      - ./transmission-config:/data/transmission-home
+      # Where finished downloads land, as a real folder on your machine
+      - ./downloads:/data/completed
     ports:
       - "9091:9091"   # Transmission's own web UI / RPC
       - "51413:51413"
       - "51413:51413/udp"
+    networks:
+      - vpn_net
 
   api:
     build: .
@@ -43,16 +60,38 @@ services:
       # - TRANSMISSION_PASSWORD=changeme
       - PORT=3000
       # Uncomment to require an X-API-Key header on every request to this API:
-      - API_KEY=${API_KEY}
+      # - API_KEY=changeme
+      # For POST /torrents/:id/push-sftp — see "SFTP push" in the README.
+      - SFTP_HOST=${SFTP_HOST:-}
+      - SFTP_PORT=${SFTP_PORT:-22}
+      - SFTP_USERNAME=${SFTP_USERNAME:-}
+      - SFTP_PRIVATE_KEY_PATH=/run/secrets/sftp_key
+      # Only needed if your private key itself is passphrase-protected:
+      # - SFTP_PRIVATE_KEY_PASSPHRASE=${SFTP_PRIVATE_KEY_PASSPHRASE:-}
+    volumes:
+      # Read-only: lets the api container read finished torrent files at
+      # the SAME path Transmission itself reports (torrent.downloadDir),
+      # so push-sftp can find them without any path translation.
+      - ./downloads:/data/completed:ro
+      # Your SFTP private key, read-only. See "SFTP push" in the README.
+      - ./sftp-keys/id_ed25519:/run/secrets/sftp_key:ro
     ports:
       - "3000:3000"
+    networks:
+      - vpn_net
 
-volumes:
-  transmission-config:
+networks:
+  vpn_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 # --- Using an existing host Transmission daemon instead ---
 # If you already run transmission-daemon natively on the host (outside
-# Docker) and just want to containerize the API:
+# Docker) and just want to containerize the API — note this bypasses the
+# VPN routing above entirely, so only use it if the host's own network is
+# already routed through PureVPN some other way:
 #   1. Delete/comment out the `transmission` service and its `depends_on`
 #      line above.
 #   2. Set the api service's TRANSMISSION_HOST to reach the host machine:
