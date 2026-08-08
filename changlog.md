@@ -10,7 +10,31 @@ the bottom.
 
 ## Unreleased
 
-Nothing pending.
+### Changed
+- `POST /torrents/:id/push-sftp` no longer blocks until the transfer
+  finishes — it now starts the upload in the background and returns `202`
+  immediately with a job id.
+- `src/sftpClient.ts`'s `pushToSftp` takes an optional progress callback:
+  byte-level for single-file torrents (via `fastPut`'s `step` option),
+  per-file-completed for directory torrents (via `uploadDir`'s `upload`
+  event, since the library doesn't expose byte-level progress for
+  directory transfers).
+
+### Added
+- `src/transferTracker.ts` — in-memory job store (`pending` →
+  `uploading` → `completed`/`failed`), auto-pruning finished jobs after
+  about an hour.
+- `GET /transfers` — list all SFTP push jobs, most recent first.
+- `GET /transfers/:jobId` — get a single job's status/progress
+  (`bytesTransferred`, `totalBytes`, `currentFile`, `error` if failed).
+- Both endpoints documented in `openapi.yaml` (new `TransferJob` schema,
+  new `transfers` tag) and `postman_collection.json` (new "Transfers"
+  folder, `{{jobId}}` variable).
+- "Push a torrent to a remote server over SFTP" section in the README
+  rewritten to cover polling for progress, plus a note on how
+  `remoteFolder` should be an absolute path from the SFTP server's own
+  root — not a path relative to the login directory, and not prefixed
+  with the real host filesystem path if connecting to a chrooted account.
 
 ## v0.5.0 — SFTP push
 

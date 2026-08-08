@@ -110,7 +110,9 @@ require the key.
 | POST   | `/torrents/:id/verify`         | Force a hash-check                            |
 | PATCH  | `/torrents/:id/location`       | Move a torrent's data to a new folder         |
 | PATCH  | `/torrents/:id/speed-limit`    | Set a per-torrent download/upload speed limit |
-| POST   | `/torrents/:id/push-sftp`      | Push a finished torrent's files to a remote server over SFTP |
+| POST   | `/torrents/:id/push-sftp`      | Start a background SFTP push of a finished torrent's files |
+| GET    | `/transfers`                   | List all SFTP push jobs (most recent first)   |
+| GET    | `/transfers/:jobId`             | Get a single SFTP push job's status/progress  |
 | DELETE | `/torrents/:id`                | Remove a torrent (`?deleteLocalData=true` to also delete files) |
 | GET    | `/session`                     | Raw Transmission session settings             |
 | PATCH  | `/session/speed-limit`         | Set the global (daemon-wide) speed limit      |
@@ -171,18 +173,52 @@ direction, or omit a field entirely to leave it unchanged. At least one of
 
 ### Push a torrent to a remote server over SFTP
 
-`POST /torrents/:id/push-sftp` uploads a finished torrent's files to
-another server using SSH key authentication. The torrent must be fully
-downloaded first, or this returns `409`.
+`POST /torrents/:id/push-sftp` starts a **background** upload of a
+finished torrent's files to another server using SSH key authentication.
+The torrent must be fully downloaded first, or this returns `409`.
 
 Connection details (host, username, private key) are configured once on
-the server side — only the destination folder is passed per request:
+the server side — only the destination folder is passed per request. The
+request returns immediately (`202`) with a job id rather than waiting for
+the whole transfer to finish:
 
 ```bash
 curl -X POST localhost:3000/torrents/1/push-sftp \
   -H "Content-Type: application/json" \
   -d '{"remoteFolder": "/incoming/movies"}'
+# => {"jobId": "1699999999999-ab12cd", "statusUrl": "/transfers/1699999999999-ab12cd", ...}
 ```
+
+**Monitoring progress:**
+
+```bash
+curl localhost:3000/transfers/1699999999999-ab12cd
+```
+```json
+{
+  "transfer": {
+    "id": "1699999999999-ab12cd",
+    "torrentId": 1,
+    "status": "uploading",
+    "bytesTransferred": 734003200,
+    "totalBytes": 2147483648,
+    "currentFile": "Rick and Morty S09E10 ....mkv",
+    "startedAt": "2026-08-08T10:15:00.000Z"
+  }
+}
+```
+
+`status` moves through `pending` → `uploading` → `completed`/`failed`. For
+a single-file torrent, `bytesTransferred` updates continuously as the
+transfer streams. For a multi-file torrent, it updates each time an
+individual file finishes (the underlying SFTP library only reports
+per-file granularity for directory uploads, not byte-level within each
+file). On failure, check the `error` field for details.
+
+`GET /transfers` lists every job, most recent first — useful for a
+dashboard rather than polling one job at a time. Jobs are kept in memory
+only (lost on server restart); completed/failed jobs are pruned after
+about an hour, while anything still `pending`/`uploading` is always kept.
 
 **One-time setup:**
 
@@ -210,8 +246,16 @@ read-only into the container from `./sftp-keys/id_ed25519` (see
 **How it finds the files:** the API asks Transmission for the torrent's
 `downloadDir`/`name`, then reads that same path itself — this only works
 because the `api` container mounts `./downloads` read-only at the exact
-same internal path (`/data/completed`) that the `transmission` container
-uses, so both containers agree on where a given torrent's files live.
+same internal path (`/downloads`) that the `transmission` container uses,
+so both containers agree on where a given torrent's files live.
+
+**`remoteFolder` should be an absolute path from the SFTP server's own
+root** (e.g. `/incoming/movies`), not a path relative to your login
+directory, and — if you're connecting to a chrooted/SFTP-only account —
+not prefixed with the real host filesystem path that sits outside the
+chroot. If you're not sure which applies, connect manually first
+(`sftp -i ./sftp-keys/id_ed25519 user@host`) and `pwd`/`ls` around to
+confirm what the server considers `/` to actually be for that account.
 
 ### Securing the wrapper API
 
@@ -301,7 +345,8 @@ src/
   routes.ts                 Express routes
   server.ts                 app bootstrap
   swagger.ts                loads openapi.yaml for swagger-ui-express
-  sftpClient.ts              SFTP push helper (SSH key auth)
+  sftpClient.ts              SFTP push helper (SSH key auth, progress)
+  transferTracker.ts          in-memory job store for background SFTP pushes
 ```
 
 ## Extending it
@@ -310,5 +355,3 @@ Anything Transmission's RPC spec supports can be added as a new method on
 `TransmissionClient` using the low-level `client.call(method, args)`, then
 exposed as a route. The full method/argument reference is here:
 https://github.com/transmission/transmission/blob/main/docs/rpc-spec.md
-
-

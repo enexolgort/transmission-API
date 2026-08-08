@@ -14,6 +14,8 @@ servers:
 tags:
   - name: torrents
     description: Manage and inspect torrents
+  - name: transfers
+    description: Background SFTP push jobs and their progress
   - name: session
     description: Transmission session settings and statistics
   - name: meta
@@ -239,10 +241,13 @@ paths:
       tags: [torrents]
       summary: Push a finished torrent's files to a remote server over SFTP
       description: >
-        Uploads the torrent's local files to a remote SFTP server using SSH
-        key authentication. Connection details (host, username, private
-        key) come from server-side configuration; only the destination
-        folder is provided per call. The torrent must be fully downloaded.
+        Starts a background upload of the torrent's local files to a remote
+        SFTP server using SSH key authentication, and returns immediately
+        with a job id — this does not block until the transfer finishes.
+        Poll GET /transfers/{jobId} for progress. Connection details (host,
+        username, private key) come from server-side configuration; only
+        the destination folder is provided per call. The torrent must be
+        fully downloaded.
       parameters:
         - $ref: "#/components/parameters/TorrentId"
       requestBody:
@@ -258,15 +263,18 @@ paths:
                   description: Destination folder on the remote SFTP server (created if missing)
                   example: /incoming/movies
       responses:
-        "200":
-          description: Upload completed
+        "202":
+          description: Transfer started in the background
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  pushed:
-                    type: boolean
+                  jobId:
+                    type: string
+                  statusUrl:
+                    type: string
+                    example: /transfers/1699999999999-ab12cd
                   torrentId:
                     type: integer
                   localPath:
@@ -280,9 +288,53 @@ paths:
         "409":
           description: Torrent isn't finished downloading yet
         "500":
-          description: SFTP not configured, private key missing, or upload failed
+          description: SFTP not configured or private key missing
         "502":
           $ref: "#/components/responses/TransmissionError"
+
+  /transfers:
+    get:
+      tags: [transfers]
+      summary: List all SFTP push jobs (most recent first)
+      description: >
+        In-memory only — jobs are lost on server restart. Completed/failed
+        jobs are pruned automatically after about an hour; pending/uploading
+        jobs are always kept.
+      responses:
+        "200":
+          description: Transfer jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TransferJob"
+
+  /transfers/{jobId}:
+    get:
+      tags: [transfers]
+      summary: Get a single SFTP push job's status/progress
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The transfer job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transfer:
+                    $ref: "#/components/schemas/TransferJob"
+        "404":
+          description: Job not found (may have been pruned after completion, or never existed)
 
   /session:
     get:
@@ -503,6 +555,38 @@ components:
           type: integer
         secondsActive:
           type: integer
+
+    TransferJob:
+      type: object
+      properties:
+        id:
+          type: string
+        torrentId:
+          type: integer
+        remoteFolder:
+          type: string
+        localPath:
+          type: string
+        status:
+          type: string
+          enum: [pending, uploading, completed, failed]
+        bytesTransferred:
+          type: integer
+        totalBytes:
+          type: integer
+        currentFile:
+          type: string
+          description: Name of the file currently being uploaded, if known
+        error:
+          type: string
+          description: Present only when status is "failed"
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          description: Present only once status is "completed" or "failed"
 
     SpeedLimitRequest:
       type: object

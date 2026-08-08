@@ -1,7 +1,8 @@
 import { Router, Request, Response, NextFunction } from "express";
 import path from "path";
 import { TransmissionClient, TransmissionRpcError } from "./transmissionClient";
-import { pushToSftp, SftpConfigError } from "./sftpClient";
+import { pushToSftp, isSftpConfigured } from "./sftpClient";
+import { createJob, getJob, listJobs, updateJob } from "./transferTracker";
 
 export function buildRouter(client: TransmissionClient): Router {
   const router = Router();
@@ -133,6 +134,10 @@ export function buildRouter(client: TransmissionClient): Router {
   // key auth). Connection details (host/user/key) come from server-side
   // config; only the destination folder is provided in the request body,
   // since it's the one thing expected to vary per call.
+  //
+  // Runs in the background rather than blocking the request — large
+  // transfers can take a while, so this returns immediately with a job id;
+  // poll GET /transfers/:jobId for progress.
   router.post(
     "/torrents/:id/push-sftp",
     h(async (req, res) => {
@@ -155,24 +160,63 @@ export function buildRouter(client: TransmissionClient): Router {
         return;
       }
 
-      const localPath = path.join(torrent.downloadDir, torrent.name);
-
-      try {
-        await pushToSftp(localPath, remoteFolder);
-      } catch (err) {
-        if (err instanceof SftpConfigError) {
-          res.status(500).json({ error: err.message });
-          return;
-        }
-        throw err;
+      // Config/key problems are checked eagerly (before creating a job) so
+      // an obviously-broken setup fails fast with a normal error response,
+      // rather than as an opaque "failed" job the caller has to go poll for.
+      if (!isSftpConfigured()) {
+        res.status(500).json({
+          error: "SFTP is not configured: set SFTP_HOST, SFTP_USERNAME, and SFTP_PRIVATE_KEY_PATH",
+        });
+        return;
       }
 
-      res.json({
-        pushed: true,
+      const localPath = path.join(torrent.downloadDir, torrent.name);
+      const job = createJob(id, remoteFolder, localPath);
+
+      // Deliberately not awaited — the job store is how the caller finds
+      // out what happened.
+      updateJob(job.id, { status: "uploading" });
+      pushToSftp(localPath, remoteFolder, (progress) => {
+        updateJob(job.id, {
+          bytesTransferred: progress.bytesTransferred,
+          totalBytes: progress.totalBytes || job.totalBytes,
+          currentFile: progress.currentFile,
+        });
+      })
+        .then(() => {
+          updateJob(job.id, { status: "completed", finishedAt: new Date().toISOString() });
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "Unknown error";
+          updateJob(job.id, { status: "failed", error: message, finishedAt: new Date().toISOString() });
+        });
+
+      res.status(202).json({
+        jobId: job.id,
+        statusUrl: `/transfers/${job.id}`,
         torrentId: id,
         localPath,
         remoteFolder,
       });
+    })
+  );
+
+  router.get(
+    "/transfers",
+    h(async (_req, res) => {
+      res.json({ transfers: listJobs() });
+    })
+  );
+
+  router.get(
+    "/transfers/:jobId",
+    h(async (req, res) => {
+      const job = getJob(req.params.jobId);
+      if (!job) {
+        res.status(404).json({ error: `Transfer job ${req.params.jobId} not found` });
+        return;
+      }
+      res.json({ transfer: job });
     })
   );
 

@@ -10,15 +10,46 @@ export class SftpConfigError extends Error {
   }
 }
 
+export interface PushProgress {
+  bytesTransferred: number;
+  totalBytes: number;
+  currentFile?: string;
+}
+
+export function isSftpConfigured(): boolean {
+  const { host, username, privateKeyPath } = sftpConfig;
+  return Boolean(host && username && privateKeyPath && fs.existsSync(privateKeyPath));
+}
+
+/** Recursively sums file sizes under a local path (0 for an empty dir). */
+function getLocalSize(localPath: string): number {
+  const stat = fs.statSync(localPath);
+  if (!stat.isDirectory()) return stat.size;
+
+  let total = 0;
+  for (const entry of fs.readdirSync(localPath)) {
+    total += getLocalSize(path.join(localPath, entry));
+  }
+  return total;
+}
+
 /**
  * Pushes a local file or directory to a remote SFTP server using SSH key
- * authentication. `remoteFolder` is only created if it doesn't already
- * exist (see note below on why this is checked rather than always calling
- * a recursive mkdir). Connection details (host/user/key) come from
- * environment config; only the destination folder is expected to vary
- * per call.
+ * authentication, reporting progress via `onProgress` as it goes (byte-level
+ * for a single file; per-file-completed for a directory, since the
+ * underlying library only exposes chunk-level progress for single
+ * transfers). `remoteFolder` is only created if it doesn't already exist
+ * (recursive mkdir on an already-existing parent segment can fail with a
+ * permission error on some servers, e.g. chrooted SFTP-only accounts, even
+ * though no creation is actually needed). Connection details (host/user/key)
+ * come from environment config; only the destination folder is expected to
+ * vary per call.
  */
-export async function pushToSftp(localPath: string, remoteFolder: string): Promise<void> {
+export async function pushToSftp(
+  localPath: string,
+  remoteFolder: string,
+  onProgress?: (progress: PushProgress) => void
+): Promise<void> {
   const { host, port, username, privateKeyPath, passphrase } = sftpConfig;
 
   if (!host || !username || !privateKeyPath) {
@@ -33,7 +64,9 @@ export async function pushToSftp(localPath: string, remoteFolder: string): Promi
     throw new Error(`Local path does not exist: ${localPath}`);
   }
 
+  const totalBytes = getLocalSize(localPath);
   const client = new SftpClient();
+
   try {
     await client.connect({
       host,
@@ -43,23 +76,43 @@ export async function pushToSftp(localPath: string, remoteFolder: string): Promi
       passphrase: passphrase || undefined,
     });
 
-    // Only attempt to create the folder if it isn't already there. Calling
-    // recursive mkdir unconditionally can fail with a permission error on
-    // some servers (e.g. chrooted SFTP-only accounts) when a parent segment
-    // of the path already exists but isn't owned/creatable by this user —
-    // even though no actual creation is needed for that segment.
     const remoteType = await client.exists(remoteFolder);
     if (!remoteType) {
       await client.mkdir(remoteFolder, true);
     }
 
     const stat = fs.statSync(localPath);
+    const remoteTarget = path.posix.join(remoteFolder, path.basename(localPath));
+
     if (stat.isDirectory()) {
-      const remoteTarget = path.posix.join(remoteFolder, path.basename(localPath));
-      await client.uploadDir(localPath, remoteTarget);
+      // uploadDir doesn't expose byte-level progress, but emits an 'upload'
+      // event after each individual file finishes — track cumulative bytes
+      // against our own precomputed per-file sizes.
+      let bytesTransferred = 0;
+      const onFileUploaded = ({ source }: { source: string; destination: string }) => {
+        try {
+          bytesTransferred += fs.statSync(source).size;
+        } catch {
+          // File may have been removed/renamed mid-transfer; skip sizing it.
+        }
+        onProgress?.({ bytesTransferred, totalBytes, currentFile: path.basename(source) });
+      };
+      client.on("upload", onFileUploaded);
+      try {
+        await client.uploadDir(localPath, remoteTarget);
+      } finally {
+        client.removeListener("upload", onFileUploaded);
+      }
     } else {
-      const remoteTarget = path.posix.join(remoteFolder, path.basename(localPath));
-      await client.put(localPath, remoteTarget);
+      await client.fastPut(localPath, remoteTarget, {
+        step: (totalTransferred: number, _chunk: number, total: number) => {
+          onProgress?.({
+            bytesTransferred: totalTransferred,
+            totalBytes: total || totalBytes,
+            currentFile: path.basename(localPath),
+          });
+        },
+      });
     }
   } finally {
     await client.end().catch(() => undefined);
