@@ -52,7 +52,7 @@ services:
       # Your SFTP private key, read-only. See "SFTP push" in the README.
       - ./sftp-keys/id_ed25519:/run/secrets/sftp_key:ro
     ports:
-      - "3000:3000"
+      - "3001:3000"
 
 # --- Using an existing host Transmission daemon instead ---
 # If you already run transmission-daemon natively on the host (outside

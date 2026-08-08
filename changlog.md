@@ -11,6 +11,15 @@ the bottom.
 ## Unreleased
 
 ### Changed
+- `docker-compose.yml`'s `api` service now maps host port `3001` → container
+  port `3000` (was `3000:3000`), since host port `3000` was already bound
+  by Forgejo on the deployment machine. The app itself still listens on
+  `3000` inside the container. `postman_collection.json`'s `baseUrl` updated
+  to match (`http://localhost:3001`). Added a callout in the README under
+  "Running with Docker" explaining this is host-specific and how to remap
+  it back if `3000` is free on a different machine.
+
+### Changed
 - `POST /torrents/:id/push-sftp` no longer blocks until the transfer
   finishes — it now starts the upload in the background and returns `202`
   immediately with a job id.

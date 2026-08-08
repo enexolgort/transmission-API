@@ -56,6 +56,20 @@ image) and `api` (this project, built from the included `Dockerfile`). The
 API is reachable at `http://localhost:3000`, and Transmission's own web UI
 at `http://localhost:9091`, if you want it.
 
+**Port 3000 already in use on your host?** (common if you also run
+something like Forgejo/Gitea, another Node dev server, etc.) Docker will
+fail to start the `api` container with `address already in use`. Fix by
+remapping the host side of the port in `docker-compose.yml`'s `api`
+service — e.g. to use `3001` instead:
+```yaml
+    ports:
+      - "3001:3000"
+```
+The app itself still listens on `3000` *inside* the container either way
+(no `PORT` env change needed) — only the host-side number changes, so
+you'd then use `http://localhost:3001` for everything below instead of
+`:3000`, and update `baseUrl` in `postman_collection.json` to match.
+
 Torrent data lands in real folders on your machine, not hidden Docker
 volumes:
 - `./downloads` — finished downloads
