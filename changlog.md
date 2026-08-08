@@ -1,9 +1,18 @@
 # Changelog
 
-All notable changes to this project are logged here, newest first.
-Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
+All notable changes to this project are documented here, newest first.
+Format follows [Keep a Changelog](https://keepachangelog.com/); versioning
+follows [SemVer](https://semver.org/).
+
+Each version header below corresponds to a `git tag` you can cut once
+you're ready to mark that point in history — see "Tagging a release" at
+the bottom.
 
 ## Unreleased
+
+Nothing pending.
+
+## v0.5.0 — SFTP push
 
 ### Added
 - `POST /torrents/:id/push-sftp` — uploads a finished torrent's files to a
@@ -13,9 +22,8 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - `sftp-keys/` folder for the SSH private key used by the push above,
   mounted read-only into the `api` container. Gitignored/dockerignored.
 - `api` service in `docker-compose.yml` now also mounts `./downloads`
-  read-only at the same path Transmission uses internally
-  (`/data/completed`), so the push route can locate torrent files without
-  needing them exposed over RPC.
+  read-only at the same path Transmission uses, so the push route can
+  locate torrent files without needing them exposed over RPC.
 - SFTP connection settings in `.env.example` (`SFTP_HOST`, `SFTP_PORT`,
   `SFTP_USERNAME`, `SFTP_PRIVATE_KEY_PASSPHRASE`).
 - "Push a torrent to a remote server over SFTP" section in the README with
@@ -25,9 +33,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Security
 - Generated and documented an `API_KEY` value for the wrapper API itself,
-  previously unset (see `.env` / `docker-compose.yml`'s `api` service).
+  previously unset.
 
-## Speed limits
+## v0.4.0 — Speed limits
 
 ### Added
 - `PATCH /torrents/:id/speed-limit` — per-torrent download/upload cap
@@ -38,41 +46,22 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   `setGlobalSpeedLimit`).
 - Documented in `openapi.yaml`, `README.md`, and `postman_collection.json`.
 
-## VPN routing (PureVPN)
-
-### Changed
-- `transmission` service in `docker-compose.yml` switched from the plain
-  `linuxserver/transmission` image to `haugene/transmission-openvpn`, which
-  bundles OpenVPN with a kill switch — Transmission can't reach the
-  internet at all if the VPN tunnel drops, rather than falling back to the
-  real IP.
-- Added `vpn_net` custom bridge network with a fixed subnet so the kill
-  switch's `LOCAL_NETWORK` allowlist can be scoped correctly.
-
-### Added
-- `vpn-config/` folder for the PureVPN `.ovpn` file, mounted into the
-  container. Gitignored/dockerignored.
-- `PUREVPN_USERNAME`, `PUREVPN_PASSWORD`, `OPENVPN_CONFIG` added to
-  `.env.example`.
-- "VPN setup (PureVPN)" section in the README, including how to verify the
-  tunnel is actually active (`curl ifconfig.me` from inside the container).
-
-## Docker
+## v0.3.0 — Docker support
 
 ### Added
 - `Dockerfile` — multi-stage build (separate `builder`/`runtime` stages),
   runs as a non-root user.
-- `docker-compose.yml` — `transmission` + `api` services on a shared
-  network.
+- `docker-compose.yml` — `transmission` (linuxserver/transmission image) +
+  `api` services on a shared Docker network.
 - `.dockerignore`.
-- Bind-mounted `./downloads` folder for finished downloads (replacing an
-  initial Docker-managed named volume, so files are browsable directly on
-  the host).
+- Bind-mounted `./downloads` and `./transmission-config` folders, so
+  torrent data and Transmission's own state are browsable directly on the
+  host rather than hidden inside Docker-managed volumes.
 - `.gitignore` (previously missing) covering `node_modules/`, `dist/`,
   `.env`, and the various runtime data folders above.
 - "Running with Docker" section in the README.
 
-## API documentation
+## v0.2.0 — API documentation
 
 ### Added
 - `openapi.yaml` — full OpenAPI 3.0 spec for every endpoint.
@@ -87,7 +76,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   failed with a `chokidar`-related `SyntaxError` under Node 18 on a WSL
   path. `tsx` is actively maintained and doesn't share that issue.
 
-## Initial release
+## v0.1.0 — Initial release
 
 ### Added
 - TypeScript/Express HTTP API wrapping Transmission's RPC interface.
@@ -99,3 +88,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 - Optional `X-API-Key` auth for the wrapper API itself
   (`src/config.ts`/`src/server.ts`).
 - `README.md` with setup and endpoint documentation.
+
+---
+
+## Tagging a release
+
+Once you're happy with a point in history and want it to exist as a real
+git tag (not just a changelog section), from the project root:
+
+```bash
+git add -A
+git commit -m "v0.1.0"
+git tag v0.1.0
+```
+
+Repeat for each version as you reach it — e.g. after committing the Docker
+work, `git tag v0.3.0`. Since none of these have been tagged yet, all of
+the above is currently still "unreleased" in the strict sense; the version
+numbers here are a roadmap for where each `git tag` should land once you
+start committing, grouped by what actually shipped rather than every
+individual back-and-forth along the way (an OpenVPN/PureVPN routing setup
+was tried and then fully reverted before ever being tagged, so it isn't
+listed here — nothing was ever released with it in place).

@@ -46,72 +46,26 @@ The API listens on `PORT` (default `3000`).
 
 ## Running with Docker
 
-Transmission's traffic is routed through OpenVPN with a kill switch (via
-[haugene/transmission-openvpn](https://github.com/haugene/docker-transmission-openvpn)),
-so it can't leak outside the VPN tunnel even if the connection drops. See
-**VPN setup (PureVPN)** below before your first `docker compose up`.
-
 ```bash
 docker compose up -d --build
 ```
 
-This brings up two containers: `transmission` (Transmission + OpenVPN) and
-`api` (this project, built from the included `Dockerfile`). The API is
-reachable at `http://localhost:3000`, and Transmission's own web UI at
-`http://localhost:9091`.
+This brings up two containers: `transmission` (a full Transmission daemon,
+using the [linuxserver/transmission](https://docs.linuxserver.io/images/docker-transmission/)
+image) and `api` (this project, built from the included `Dockerfile`). The
+API is reachable at `http://localhost:3000`, and Transmission's own web UI
+at `http://localhost:9091`, if you want it.
 
 Torrent data lands in real folders on your machine, not hidden Docker
 volumes:
 - `./downloads` — finished downloads
 - `./transmission-config` — Transmission's own state (settings, resume data)
-- `./vpn-config` — your PureVPN `.ovpn` file (see below)
-
-### VPN setup (PureVPN)
-
-1. **Get PureVPN's OpenVPN config file and credentials** — these are
-   different from your PureVPN account login:
-   - Log in to PureVPN's [Member Area](https://my.purevpn.com/), go to
-     **Subscriptions**, and reveal your VPN-specific username/password
-     (separate from your account email/password).
-   - Download an `.ovpn` file for a P2P-friendly server location from the
-     **Manual Setup / OpenVPN Config Files** section of the same site.
-2. **Place the file** in this project at `./vpn-config/purevpn.ovpn`
-   (create the `vpn-config` folder if it doesn't exist).
-3. **Set your credentials** in `.env` (copy `.env.example` first if you
-   haven't already):
-   ```
-   PUREVPN_USERNAME=your-purevpn-vpn-username
-   PUREVPN_PASSWORD=your-purevpn-vpn-password
-   OPENVPN_CONFIG=purevpn
-   ```
-   `OPENVPN_CONFIG` should match your `.ovpn` filename without the
-   extension — leave it as `purevpn` if you followed step 2 exactly.
-4. Bring up the stack and check the logs to confirm the tunnel connected:
-   ```bash
-   docker compose up -d --build
-   docker compose logs -f transmission
-   ```
-   Look for a line like `Initialization Sequence Completed` — that means
-   OpenVPN is up.
-5. **Verify traffic is actually going through the VPN**, not just that
-   OpenVPN reports connected:
-   ```bash
-   docker exec transmission curl -s https://ifconfig.me
-   ```
-   The IP printed here should be a PureVPN server IP, not your real ISP
-   IP (compare it against `curl -s https://ifconfig.me` run directly on
-   your host, outside any container).
-
-If the VPN tunnel ever drops, the container's firewall blocks Transmission
-from reaching the internet at all (rather than falling back to your real
-IP) — you'll see torrents simply stop transferring rather than leak.
 
 **Already running Transmission natively on the host** and just want to
-containerize the API instead of using the VPN-routed setup above? See the
-commented-out notes at the bottom of `docker-compose.yml` for pointing
-`TRANSMISSION_HOST` at the host machine — but note that bypasses the VPN
-routing entirely, so only do this if your host's own network traffic is
-already routed through PureVPN some other way.
+containerize the API? Comment out the `transmission` service in
+`docker-compose.yml` and point `TRANSMISSION_HOST` at the host machine
+instead — see the notes at the bottom of that file for the exact steps
+(they differ slightly between Docker Desktop and native Linux Docker).
 
 To rebuild after code changes:
 ```bash
@@ -337,7 +291,6 @@ openapi.yaml               OpenAPI 3.0 spec (source of truth for /docs)
 Dockerfile                 multi-stage build for the api service
 docker-compose.yml          transmission (via VPN) + api stack
 .dockerignore
-vpn-config/                 your PureVPN .ovpn file goes here (gitignored)
 downloads/                  finished downloads land here (gitignored)
 transmission-config/        Transmission's own state (gitignored)
 sftp-keys/                  your SSH private key for push-sftp goes here (gitignored)

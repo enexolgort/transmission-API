@@ -3,8 +3,6 @@ dist/
 .env
 downloads/*
 !downloads/.gitkeep
-vpn-config/*
-!vpn-config/.gitkeep
 transmission-config/
 sftp-keys/*
 !sftp-keys/.gitkeep

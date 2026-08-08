@@ -2,7 +2,6 @@ node_modules
 dist
 .env
 downloads
-vpn-config
 transmission-config
 sftp-keys
 .git
